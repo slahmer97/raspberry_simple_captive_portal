@@ -192,4 +192,4 @@ if __name__ == '__main__':
     interface = args.interface
   print("host:port : {}:{}".format(host, port))
   captive_portal = CaptivePortal( interface=interface, server_ip_addr = host, server_port=port)
-  app.run(host=host, port=port)
+  app.run(ssl_context='adhoc', host=host, port=port)
