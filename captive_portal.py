@@ -1,3 +1,5 @@
+import datetime
+import ipaddress
 import hashlib
 import argparse
 import sqlite3
@@ -12,10 +14,20 @@ class CaptivePortal:
 		self.interface = interface
 		self.server_ip_addr = server_ip_addr
 		self.server_port = server_port
-		subprocess.call(["iptables", "-A", "FORWARD", "-i", interface, "-p", "tcp", "--dport", "53", "-j" ,"ACCEPT"])
-		subprocess.call(["iptables", "-A", "FORWARD", "-i", interface, "-p", "udp", "--dport", "53", "-j" ,"ACCEPT"])
-		subprocess.call(["iptables", "-A", "FORWARD", "-i", interface, "-p", "tcp", "--dport", str(server_port),"-d", server_ip_addr, "-j" ,"ACCEPT"])
-		subprocess.call(["iptables", "-A", "FORWARD", "-i", interface, "-j" ,"DROP"])
+		self.max_connections = 1
+		tmp = ipaddress.ip_address(server_ip_addr)
+		if isinstance(tmp, ipaddress.IPv4Address):
+			self.iptables = "iptables"
+		elif isinstance(tmp, ipaddress.IPv6Address):
+			self.iptables = "ip6tables"
+		else:
+			print ("[!] no ip type found, default ipv4")
+			self.iptables = "iptables"
+		subprocess.call([self.iptables, "-A", "FORWARD", "-i", interface, "-p", "tcp", "--dport", "53", "-j" ,"ACCEPT"])
+		subprocess.call([self.iptables, "-A", "FORWARD", "-i", interface, "-p", "udp", "--dport", "53", "-j" ,"ACCEPT"])
+		subprocess.call([self.iptables, "-A", "FORWARD", "-i", interface, "-p", "tcp", "--dport", 
+				 str(server_port),"-d", server_ip_addr, "-j" ,"ACCEPT"])
+		subprocess.call([self.iptables, "-A", "FORWARD", "-i", interface, "-j" ,"DROP"])
 	def init_db(self):
 		query = """CREATE TABLE users (
 			user_id INTEGER PRIMARY KEY,
@@ -29,10 +41,11 @@ class CaptivePortal:
 			CREATE TABLE users_connections(
    			connection_id INTEGER,
    			connection_time timestamp,
-   			FOREIGN KEY (user_id) 
-      				REFERENCES users (user_id) 
-         				ON DELETE CASCADE 
-         				ON UPDATE NO ACTION
+			connection_ip TEXT NOT NULL,
+			connection_ip_version INTEGER,
+			user_id INTEGER NOT NULL,
+   			FOREIGN KEY (user_id)
+				REFERENCES users(user_id)
 			);
 			"""
 		try:
@@ -49,8 +62,39 @@ class CaptivePortal:
 		if len(rows):
 			return rows[0]["user_id"]
 		return None
+	def add_new_connection(self, user_id, remote_ip):
+		subprocess.call([self.iptables,"-t", "nat", "-I", "PREROUTING","1", "-s", remote_ip, "-j" ,"ACCEPT"])
+		subprocess.call([self.iptables, "-I", "FORWARD", "-s", remote_ip, "-j" ,"ACCEPT"])
+		#self.wfile.write("You are now authorized. Navigate to any URL")
+		con = sqlite3.connect('database.db')
+		cur = con.cursor()
+		tmp = ipaddress.ip_address(remote_ip)
+		if isinstance(tmp, ipaddress.IPv4Address):
+			ver = 4
+		elif isinstance(tmp, ipaddress.IPv6Address):
+			ver = 6
+		else:
+			print("[!] add_new_connection() ip version is unknown")
+			ver = 4
+		try:
+			cur.execute(
+                	"""INSERT INTO users_connections (connection_time,connection_ip, connection_ip_version, user_id)
+		   	VALUES (?,?,?,?)"""
+		   	,(datetime.datetime.now(), remote_ip, ver, user_id) )
+			con.commit()
+		except Exception as inst:
+			con.rollback()
+			print("[!] E : {}".format(inst))
+	def get_user_connections_count(self, user_id):
+		return 1
 	def authorize(self, user_id, ip):
 		print( "user_id : {} -- ip : {}".format(user_id, ip))
+		if self.get_user_connections_count(user_id) <= self.max_connections:
+			self.add_new_connection(user_id, ip)
+			return "You are authorize now to start surfing the internet ^^ ;)"
+		errors = {}
+		errors["error"] = "Your account allow you to have only 5 simultanuous connections ^^"
+		return render_template("error.html",errors = errors)
 	def run_captive_portal_server(self):
 		pass
 
@@ -59,6 +103,22 @@ class CaptivePortal:
 
 app = Flask(__name__)
 captive_portal = None
+
+@app.route("/list_connections")
+def list_connections():
+	con = sqlite3.connect("database.db")
+	con.row_factory = sqlite3.Row
+	cur = con.cursor()
+	cur.execute("""
+		select users.username, users.email,
+		       users_connections.connection_time,
+		       users_connections.connection_ip,
+                       users_connections.connection_ip_version
+		from users, users_connections
+		WHERE users.user_id = users_connections.user_id
+		""")
+	rows = cur.fetchall();
+	return render_template("list_connections.html",rows = rows)
 
 @app.route('/')
 def cp_home():
@@ -105,10 +165,10 @@ def user_auth():
     print("username : {} -- password : {}".format(username, password))
     user_id = captive_portal.authenticate(username, password)
     if user_id:
-      captive_portal.authorize(user_id, "{}".format(request.remote_addr))
-      return "good"
+      ret = captive_portal.authorize(user_id, "{}".format(request.remote_addr))
+      return ret
     else:
-      return "not good"
+      return "Bad password"
 @app.route('/welcome_new_user', methods = ['POST', 'GET'])
 def welcome_new_user():
    return render_template('user_auth.html')
