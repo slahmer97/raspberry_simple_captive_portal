@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+   <body>
+      <table border = 1>
+         <thead>
+            <td>Username</td>
+            <td>Email</td>
+            <td>Established at</td>
+            <td>Ip Address</td>
+	    <td>Ip version </td>
+         </thead>
+         
+         {% for row in rows %}
+            <tr>
+               <td>{{row["username"]}}</td>
+               <td>{{row["email"]}}</td>
+               <td> {{ row["connection_time"]}}</td>
+               <td>{{row["connection_ip"]}}</td>
+	       <td>{{row["connection_ip_version"]}}</td>	
+            </tr>
+         {% endfor %}
+      </table>
+      
+      <a href = "/">Go back to home page</a>
+   </body>
+</html>
