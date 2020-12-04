@@ -1,19 +1,58 @@
 <html>
+<head>
+<title>Add new user (Require Admin)</title>
+<style>
+input[type=submit] {
+  width: 100%;
+  background-color: #4CAF50;
+  color: white;
+  padding: 14px 20px;
+  margin: 8px 0;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+input, select {
+  width: 350px;
+  padding: 12px 20px;
+  margin: 8px 0;
+  display: inline-block;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+
+input[type=submit]:hover {
+  background-color: #45a049;
+}
+
+div {
+  width: 400px;
+  border-radius: 5px;
+  background-color: #f2f2f2;
+  padding: 20px;
+}
+</style>
+</head>
    <body>
+         <h3>Add new user -- Please don't add a new user unless you are the Admin, We do trust you Lol</h3>
+	<div>
       <form action = "{{ url_for('add_user') }}" method = "POST">
-         <h3>Add new user -- normally this would be accessible to an authenticated admin ^^</h3>
          first name<br>
-         <input type = "text" name = "first_name" /></br>
+         <input required type = "text" name = "first_name" /></br>
          last name<br>
-         <input type = "text" name = "last_name" /></br>
+         <input required type = "text" name = "last_name" /></br>
          email<br>
-         <input type = "text" name = "email" /></br>
+         <input required type = "text" name = "email" /></br>
          username<br>
-         <input type = "text" name = "username" /></br>
+         <input required type = "text" name = "username" /></br>
 
 	 Password<br>
-         <input type = "password" name = "password" /><br>
+         <input required type = "password" name = "password" /><br>
          <input type = "submit" value = "submit" /><br>
       </form>
+</div>
    </body>
 </html>
