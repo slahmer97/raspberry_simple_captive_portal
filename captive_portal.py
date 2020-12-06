@@ -1,3 +1,5 @@
+import threading
+import atexit
 import datetime
 import ipaddress
 import hashlib
@@ -28,6 +30,12 @@ class CaptivePortal:
 		subprocess.call([self.iptables, "-A", "FORWARD", "-i", interface, "-p", "tcp", "--dport", 
 				 str(server_port),"-d", server_ip_addr, "-j" ,"ACCEPT"])
 		subprocess.call([self.iptables, "-A", "FORWARD", "-i", interface, "-j" ,"DROP"])
+	def exit(self):
+		subprocess.call([self.iptables, "-D", "FORWARD", "-i", interface, "-p", "tcp", "--dport", "53", "-j" ,"ACCEPT"])
+		subprocess.call([self.iptables, "-D", "FORWARD", "-i", interface, "-p", "udp", "--dport", "53", "-j" ,"ACCEPT"])
+		subprocess.call([self.iptables, "-D", "FORWARD", "-i", interface, "-p", "tcp", "--dport",
+				str(self.server_port),"-d", self.server_ip_addr, "-j" ,"ACCEPT"])
+		subprocess.call([self.iptables, "-D", "FORWARD", "-i", interface, "-j" ,"DROP"])
 	def init_db(self):
 		query = """CREATE TABLE users (
 			user_id INTEGER PRIMARY KEY,
@@ -63,7 +71,7 @@ class CaptivePortal:
 			return rows[0]["user_id"]
 		return None
 	def add_new_connection(self, user_id, remote_ip):
-		subprocess.call([self.iptables,"-t", "nat", "-I", "PREROUTING","1", "-s", remote_ip, "-j" ,"ACCEPT"])
+		subprocess.call([self.iptables,"-t", "nat", "-I", "PREROUTING","-s", remote_ip, "-j" ,"ACCEPT"])
 		subprocess.call([self.iptables, "-I", "FORWARD", "-s", remote_ip, "-j" ,"ACCEPT"])
 		#self.wfile.write("You are now authorized. Navigate to any URL")
 		con = sqlite3.connect('database.db')
@@ -101,8 +109,18 @@ class CaptivePortal:
 
 #a = CaptivePortal()
 
-app = Flask(__name__)
+import atexit
+
 captive_portal = None
+
+def exit_handler():
+    global captive_portal
+    captive_portal.exit()
+    print ('aMy application is wending!')
+
+atexit.register(exit_handler)
+
+app = Flask(__name__)
 
 @app.route("/list_connections")
 def list_connections():
@@ -173,7 +191,37 @@ def user_auth():
 def welcome_new_user():
    return render_template('user_auth.html')
 
+def my_func(ipversion):
+  import time
+  con = sqlite3.connect("database.db")
+  while True:  
+    try:
+      con.row_factory = sqlite3.Row
+      cur = con.cursor()
+      cur.execute("""
+                	select users_connections.connection_ip
+                	from users_connections
+               		WHERE users_connections.connection_ip_version = {}
+                	""".format(ipversion))
+      rows = cur.fetchall();
+      for record in rows:
+          print(record[0])
 
+      for record in rows:
+        address = record[0]
+        if ipversion == 4:
+            res = subprocess.call(['ping', '-c', '1', address])
+        else:
+            res = subprocess.call(['ping6', '-c', '1', address])
+        if res != 0:
+            print("USER {} has disconnected".format(address))
+            cur.execute("delete from users_connections where users_connections.connection_ip LIKE '%{}%'".format(str(address)))
+            con.commit()
+            subprocess.call(["iptables", "-D", "FORWARD", "-s", "{}/32".format(address), "-j", "ACCEPT"])
+            subprocess.call(["iptables", "-D", "FORWARD", "-s", "{}/32".format(address), "-j", "ACCEPT"])
+      time.sleep(5)
+    except Exception as inst:
+        print("E : {}".format(inst))
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
   parser.add_argument("--port", help="port")
@@ -192,4 +240,8 @@ if __name__ == '__main__':
     interface = args.interface
   print("host:port : {}:{}".format(host, port))
   captive_portal = CaptivePortal( interface=interface, server_ip_addr = host, server_port=port)
+  from threading import Thread
+  thread = Thread(target=my_func, args=(4,))
+  thread.daemon = True
+  thread.start()
   app.run(ssl_context='adhoc', host=host, port=port)
