@@ -79,11 +79,11 @@ class CaptivePortal:
 		tmp = ipaddress.ip_address(remote_ip)
 		if isinstance(tmp, ipaddress.IPv4Address):
 			ver = 4
+			ip = "iptables"
 		elif isinstance(tmp, ipaddress.IPv6Address):
 			ver = 6
 		else:
 			print("[!] add_new_connection() ip version is unknown")
-			ver = 4
 		try:
 			cur.execute(
                 	"""INSERT INTO users_connections (connection_time,connection_ip, connection_ip_version, user_id)
@@ -194,6 +194,7 @@ def welcome_new_user():
 def my_func(ipversion):
   import time
   con = sqlite3.connect("database.db")
+  f = open("captive.log", "w")
   while True:  
     try:
       con.row_factory = sqlite3.Row
@@ -206,19 +207,25 @@ def my_func(ipversion):
       rows = cur.fetchall();
       for record in rows:
           print(record[0])
-
+      print("Start scanning")
       for record in rows:
         address = record[0]
         if ipversion == 4:
-            res = subprocess.call(['ping', '-c', '1', address])
+            res = subprocess.call(['ping', '-c', '1', address], stdout=f)
         else:
-            res = subprocess.call(['ping6', '-c', '1', address])
+            res = subprocess.call(['ping6', '-c', '1', address], stdout=f)
         if res != 0:
             print("USER {} has disconnected".format(address))
             cur.execute("delete from users_connections where users_connections.connection_ip LIKE '%{}%'".format(str(address)))
             con.commit()
-            subprocess.call(["iptables", "-D", "FORWARD", "-s", "{}/32".format(address), "-j", "ACCEPT"])
-            subprocess.call(["iptables", "-D", "FORWARD", "-s", "{}/32".format(address), "-j", "ACCEPT"])
+            if ipversion == 4:
+                print("Removing client {}".format(address))
+                subprocess.call(["iptables", "-D", "FORWARD", "-s", "{}".format(address), "-j", "ACCEPT"],stdout=f)
+                subprocess.call(["iptables", '-t', 'nat', "-D", "PREROUTING", "-s", "{}".format(address), '-j', "ACCEPT"], stdout=f)
+            else:
+                subprocess.call(["ip6tables", "-D", "FORWARD", "-s", "{}".format(address), "-j", "ACCEPT"], stdout=f)
+                subprocess.call(["ip6tables","-t", "nat", "-D", "PREROUTING", "-s", "{}".format(address), "-j", "ACCEPT"],stdout=f)
+      print("Stopped scanning")
       time.sleep(5)
     except Exception as inst:
         print("E : {}".format(inst))
@@ -227,21 +234,25 @@ if __name__ == '__main__':
   parser.add_argument("--port", help="port")
   parser.add_argument("--host")
   parser.add_argument("--interface")
+  parser.add_argument("--ipv")
   args = parser.parse_args()
   print(args)
   host = "10.3.141.1"
   port = 9999
   interface = "wlan0"
+  ipv = 4
   if args.port:
     port = args.port
   if args.host:
     host = args.host
   if args.interface:
     interface = args.interface
+  if args.ipv:
+    ipv = args.ipv
   print("host:port : {}:{}".format(host, port))
   captive_portal = CaptivePortal( interface=interface, server_ip_addr = host, server_port=port)
   from threading import Thread
-  thread = Thread(target=my_func, args=(4,))
+  thread = Thread(target=my_func, args=(ipv,))
   thread.daemon = True
   thread.start()
   app.run(ssl_context='adhoc', host=host, port=port)
